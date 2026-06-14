@@ -24,7 +24,7 @@ const securityHeaders = [
       "media-src 'self' blob: data: http: https:",
       "worker-src 'self' blob:",
       "object-src 'none'",
-      "upgrade-insecure-requests",
+      ...(process.env.CLAW3D_FORCE_HTTPS === "1" ? ["upgrade-insecure-requests"] : []),
     ].join("; "),
   },
   {

@@ -236,6 +236,10 @@ type FeedEvent = {
   kind?: "status" | "reply";
 };
 
+type RenderMode = "balanced" | "performance";
+
+const RENDER_MODE_STORAGE_KEY = "retro-office:render-mode";
+
 const EMPTY_STRING_RECORD: Record<string, string> = {};
 const EMPTY_BOOLEAN_RECORD: Record<string, boolean> = {};
 const EMPTY_NUMBER_RECORD: Record<string, number> = {};
@@ -2634,19 +2638,47 @@ export function RetroOffice3D({
     () => ({ pos: CAM_POS, target: cameraTarget, zoom: cameraZoom }),
     [CAM_POS, cameraTarget, cameraZoom]
   );
-  const canvasResetKey = useMemo(
-    () =>
-      [
-        remoteOfficeEnabled ? "remote" : "local",
-        gatewayStatus ?? "unknown",
-        String(agents.length),
-        String(officeCenterSignal),
-      ].join(":"),
-    [agents.length, gatewayStatus, officeCenterSignal, remoteOfficeEnabled],
-  );
+  const [renderMode, setRenderMode] = useState<RenderMode>("performance");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const savedRenderMode = window.localStorage.getItem(RENDER_MODE_STORAGE_KEY);
+      if (savedRenderMode === "balanced" || savedRenderMode === "performance") {
+        setRenderMode(savedRenderMode);
+      }
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(RENDER_MODE_STORAGE_KEY, renderMode);
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, [renderMode]);
+  const canvasResetKey = `${renderMode}:${remoteOfficeEnabled ? "remote" : "local"}:${officeCenterSignal}`;
   // New Idea 7: heatmap mode.
   const [heatmapMode, setHeatmapMode] = useState(false);
   const [trailMode, setTrailMode] = useState(false);
+  const renderConfig = useMemo(
+    () =>
+      renderMode === "performance"
+        ? {
+            dpr: [0.7, 1] as [number, number],
+            antialias: false,
+            shadows: false,
+            environment: false,
+          }
+        : {
+            dpr: [0.85, 1.5] as [number, number],
+            antialias: true,
+            shadows: true,
+            environment: true,
+          },
+    [renderMode],
+  );
   const heatGridRef = useRef<Uint16Array | null>(null);
   // E3 Idea 1: mood emoji reactions above agent chips.
   const [moodByAgentId, setMoodByAgentId] = useState<
@@ -5185,15 +5217,20 @@ export function RetroOffice3D({
           <Canvas
             key={canvasResetKey}
             orthographic
-            dpr={[0.85, 1.5]}
+            dpr={renderConfig.dpr}
             camera={{
               position: CAM_POS,
               zoom: cameraZoom,
               near: 0.1,
               far: 100,
             }}
-            shadows={{ type: THREE.PCFShadowMap }}
-            gl={{ antialias: true, powerPreference: "high-performance" }}
+            shadows={
+              renderConfig.shadows ? { type: THREE.PCFShadowMap } : false
+            }
+            gl={{
+              antialias: renderConfig.antialias,
+              powerPreference: "high-performance",
+            }}
             style={{ width: "100%", height: "100%" }}
             onPointerUp={() => {
               if (drag.kind === "moving") setDrag({ kind: "idle" });
@@ -5253,7 +5290,7 @@ export function RetroOffice3D({
               position={[8, 14, 6]}
               intensity={1.1}
               color="#f6f1e6"
-              castShadow
+              castShadow={renderConfig.shadows}
               shadow-mapSize={[1024, 1024]}
               shadow-bias={-0.0002}
               shadow-normalBias={0.02}
@@ -5271,9 +5308,11 @@ export function RetroOffice3D({
             <SceneWallPictures showRemoteOffice={remoteOfficeEnabled} />
 
             {/* Environment lighting — async, wrapped in its own Suspense so floor stays visible. */}
-            <Suspense fallback={null}>
-              <Environment preset="city" />
-            </Suspense>
+            {renderConfig.environment ? (
+              <Suspense fallback={null}>
+                <Environment preset="city" />
+              </Suspense>
+            ) : null}
 
             {/* Furniture models — each loads its GLB asynchronously. */}
             <Suspense fallback={null}>
@@ -5865,6 +5904,32 @@ export function RetroOffice3D({
                 {icon}
               </button>
             ))}
+          </div>
+          <div className="flex items-center gap-1 rounded-md border border-amber-900/20 bg-[#1c1610]/80 p-1 backdrop-blur-sm">
+            <button
+              type="button"
+              title="Balanced mode"
+              onClick={() => setRenderMode("balanced")}
+              className={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+                renderMode === "balanced"
+                  ? "bg-amber-500/20 text-amber-200"
+                  : "text-amber-500/70 hover:text-amber-300"
+              }`}
+            >
+              Balanced
+            </button>
+            <button
+              type="button"
+              title="Performance mode"
+              onClick={() => setRenderMode("performance")}
+              className={`rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+                renderMode === "performance"
+                  ? "bg-amber-500/20 text-amber-200"
+                  : "text-amber-500/70 hover:text-amber-300"
+              }`}
+            >
+              Performance
+            </button>
           </div>
           {standupMeeting ? (
             <button

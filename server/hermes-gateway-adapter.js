@@ -62,6 +62,8 @@ const ADAPTER_PORT = parseInt(process.env.HERMES_ADAPTER_PORT || "18789", 10);
 const HERMES_MODEL = process.env.HERMES_MODEL || "hermes";
 const HERMES_AGENT_NAME = process.env.HERMES_AGENT_NAME || "Hermes";
 const HOME = process.env.HOME || "/tmp";
+const HERMES_BOOT_TEAM_ENABLED = String(process.env.HERMES_BOOT_TEAM_ENABLED || "").toLowerCase() === "true";
+const HERMES_BOOT_TEAM_JSON = process.env.HERMES_BOOT_TEAM_JSON || "";
 
 const AGENT_ID = "hermes";
 const MAIN_KEY = "main";
@@ -231,6 +233,60 @@ const agentRegistry = new Map([
     settings: { wipe: false, continuity: true, model: HERMES_MODEL },
   }],
 ]);
+
+function applyBootTeamFromEnv() {
+  if (!HERMES_BOOT_TEAM_ENABLED) return;
+  const raw = typeof HERMES_BOOT_TEAM_JSON === "string" ? HERMES_BOOT_TEAM_JSON.trim() : "";
+  if (!raw) {
+    console.warn("[hermes-adapter] Boot team enabled but HERMES_BOOT_TEAM_JSON is empty; skipping.");
+    return;
+  }
+
+  let entries;
+  try {
+    entries = JSON.parse(raw);
+  } catch (err) {
+    console.warn("[hermes-adapter] Invalid HERMES_BOOT_TEAM_JSON; skipping boot team:", sanitizeErrorMessage(err));
+    return;
+  }
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    console.warn("[hermes-adapter] HERMES_BOOT_TEAM_JSON has no entries; skipping.");
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = typeof entry.id === "string" ? entry.id.trim() : "";
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    if (!id || !name || id === AGENT_ID) continue;
+
+    const duplicateById = agentRegistry.has(id);
+    const duplicateByName = [...agentRegistry.values()].some((a) => a.name.toLowerCase() === name.toLowerCase());
+    if (duplicateById || duplicateByName) continue;
+
+    const role = typeof entry.role === "string" ? entry.role.trim() : "";
+    const instructions = typeof entry.instructions === "string" ? entry.instructions.trim() : "";
+    const boundaries = typeof entry.boundaries === "string" ? entry.boundaries.trim() : "";
+    const model = typeof entry.model === "string" && entry.model.trim() ? entry.model.trim() : HERMES_MODEL;
+    const wipe = Boolean(entry.wipe);
+    const continuity = entry.continuity !== false;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || id;
+
+    let systemPrompt = instructions || `You are ${name}, a ${role || "specialist"} agent.`;
+    if (boundaries) systemPrompt += `\n\nBoundaries: ${boundaries}`;
+
+    agentRegistry.set(id, {
+      id,
+      name,
+      workspace: `${HOME}/.hermes/workspace-${slug}`,
+      role,
+      systemPrompt,
+      settings: { wipe, continuity, model, boundaries },
+    });
+    console.log(`[hermes-adapter] Boot team added agent: ${name} (${id})`);
+  }
+}
 
 // Set of all active sendEvent functions (one per connected WS client)
 /** @type {Set<(frame: object) => void>} */
@@ -1276,4 +1332,5 @@ function startAdapter() {
 }
 
 loadHistoryFromDisk();
+applyBootTeamFromEnv();
 startAdapter();

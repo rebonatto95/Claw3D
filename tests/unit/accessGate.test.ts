@@ -9,7 +9,7 @@ describe("createAccessGate", () => {
     expect(gate.allowUpgrade({ headers: {} })).toBe(true);
   });
 
-  it("rejects /api requests without cookie when enabled", async () => {
+  it("does not gate /api requests even when token is configured", async () => {
     const { createAccessGate } = await import("../../server/access-gate");
     const gate = createAccessGate({ token: "abc" });
 
@@ -33,20 +33,20 @@ describe("createAccessGate", () => {
       res
     );
 
-    expect(handled).toBe(true);
-    expect(statusCode).toBe(401);
-    expect(ended).toBe(true);
+    expect(handled).toBe(false);
+    expect(statusCode).toBe(0);
+    expect(ended).toBe(false);
   });
 
-  it("allows upgrades when cookie matches", async () => {
+  it("allows upgrades when token is configured", async () => {
     const { createAccessGate } = await import("../../server/access-gate");
     const gate = createAccessGate({ token: "abc" });
     expect(
-      gate.allowUpgrade({ headers: { cookie: "studio_access=abc" } })
+      gate.allowUpgrade({ headers: {} })
     ).toBe(true);
   });
 
-  it("returns 429 after repeated failed attempts", async () => {
+  it("never throttles by studio_access token anymore", async () => {
     const { createAccessGate } = await import("../../server/access-gate");
     const gate = createAccessGate({ token: "abc" });
 
@@ -76,7 +76,7 @@ describe("createAccessGate", () => {
         { url: "/api/studio", headers: {}, socket: { remoteAddress: "127.0.0.1" } },
         res
       );
-      expect(res.statusCode).toBe(401);
+      expect(res.statusCode).toBe(0);
     }
 
     const limited = createResponse();
@@ -85,11 +85,11 @@ describe("createAccessGate", () => {
       limited
     );
 
-    expect(limited.statusCode).toBe(429);
-    expect(limited.body).toContain("Too many failed studio access attempts");
+    expect(limited.statusCode).toBe(0);
+    expect(limited.body).toBe("");
   });
 
-  it("recovers immediately when a valid cookie is sent after throttling", async () => {
+  it("keeps allowing requests regardless of cookie when token is configured", async () => {
     const { createAccessGate } = await import("../../server/access-gate");
     const gate = createAccessGate({ token: "abc" });
 
@@ -122,17 +122,14 @@ describe("createAccessGate", () => {
     }
 
     expect(
-      gate.allowUpgrade({
-        headers: { cookie: "studio_access=abc" },
-        socket: { remoteAddress: "127.0.0.1" },
-      })
+      gate.allowUpgrade({ headers: {}, socket: { remoteAddress: "127.0.0.1" } })
     ).toBe(true);
 
     const recovered = createResponse();
     gate.handleHttp(
       {
         url: "/api/studio",
-        headers: { cookie: "studio_access=abc" },
+        headers: {},
         socket: { remoteAddress: "127.0.0.1" },
       },
       recovered
@@ -146,7 +143,7 @@ describe("createAccessGate", () => {
       afterReset
     );
 
-    expect(afterReset.statusCode).toBe(401);
-    expect(afterReset.body).toContain("Studio access token required");
+    expect(afterReset.statusCode).toBe(0);
+    expect(afterReset.body).toBe("");
   });
 });

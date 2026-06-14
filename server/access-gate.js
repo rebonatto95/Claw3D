@@ -16,6 +16,14 @@ const parseCookies = (header) => {
   return out;
 };
 
+const parseBearerToken = (header) => {
+  if (typeof header !== "string") return "";
+  const trimmed = header.trim();
+  if (!trimmed) return "";
+  const match = /^Bearer\s+(.+)$/i.exec(trimmed);
+  return match?.[1]?.trim() || "";
+};
+
 /** Constant-time string comparison to prevent timing attacks. */
 const safeCompare = (a, b) => {
   if (typeof a !== "string" || typeof b !== "string") return false;
@@ -83,15 +91,21 @@ function createAccessGate(options) {
   const token = String(options?.token ?? "").trim();
   const cookieName = String(options?.cookieName ?? "studio_access").trim() || "studio_access";
 
-  const enabled = Boolean(token);
+  // Access to Studio now relies on panel password/session flow.
+  // Keep this gate disabled even if STUDIO_ACCESS_TOKEN is configured.
+  const enabled = false;
   const rateLimiter = createRateLimiter(10, 60_000);
 
   const getAuthState = (req) => {
     if (!enabled) return { authorized: true, limited: false };
     const ip = resolveClientIp(req);
     const cookieHeader = req.headers?.cookie;
+    const authHeader = req.headers?.authorization;
     const cookies = parseCookies(cookieHeader);
-    const authorized = safeCompare(cookies[cookieName] || "", token);
+    const bearer = parseBearerToken(authHeader);
+    const authorized =
+      safeCompare(cookies[cookieName] || "", token) ||
+      safeCompare(bearer, token);
     if (authorized) {
       rateLimiter.reset(ip);
       return { authorized: true, limited: false };
@@ -115,7 +129,7 @@ function createAccessGate(options) {
           JSON.stringify({
             error: auth.limited
               ? "Too many failed studio access attempts. Wait a minute and retry."
-              : "Studio access token required. Send the configured Studio access cookie and retry.",
+              : "Studio access token required. Send Authorization: Bearer <token> or the configured studio_access cookie.",
           })
         );
       } else {
